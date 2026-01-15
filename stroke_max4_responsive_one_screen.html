@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>笔顺展示</title>
+  <script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.7.3/dist/hanzi-writer.min.js"></script>
+  <style>
+    :root{
+      --base:130px;
+      --bg:#fff;
+      --line:rgba(0,0,0,.14);
+      --grid:rgba(0,0,0,.18);
+      --text:#111827;
+      --gap:12px;
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      background: var(--bg);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+    }
+
+    .topbar{
+      padding:12px 16px;
+      border-bottom:1px solid var(--line);
+      background:#fff;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:flex-start;
+    }
+    .topbar input{
+      width:100%;
+      max-width:420px;
+      padding:10px 12px;
+      font-size:16px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      outline:none;
+    }
+
+    .page{
+      padding: 14px 12px 22px;
+      display:flex;
+      justify-content:center;
+    }
+
+    .stack{
+      width:100%;
+      max-width:1400px;
+      display:grid;
+      gap:16px;
+    }
+
+    .row{
+      display:flex;
+      align-items:flex-start;
+      gap:16px;
+      justify-content:flex-start;
+      flex-wrap:nowrap;
+    }
+
+    .dynWrap{
+      width: var(--base);
+      flex: 0 0 auto;
+      display:grid;
+      gap: 8px;
+      justify-items:center;
+    }
+    .box{
+      width: var(--base);
+      height: var(--base);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background:#fff;
+      position: relative;
+      display:grid;
+      place-items:center;
+      overflow:hidden;
+    }
+
+    .ppBtn{
+      width: var(--base);
+      border: 1px solid var(--line);
+      background:#fff;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+      cursor:pointer;
+      line-height: 1;
+      user-select:none;
+    }
+    .ppBtn:active{ transform: translateY(1px); }
+
+    .box::before,
+    .stepCell::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      border-radius: 12px;
+      background:
+        linear-gradient(to right, transparent 49.5%, var(--grid) 49.5%, var(--grid) 50.5%, transparent 50.5%),
+        linear-gradient(to bottom, transparent 49.5%, var(--grid) 49.5%, var(--grid) 50.5%, transparent 50.5%),
+        linear-gradient(135deg, transparent 49.7%, rgba(0,0,0,.10) 49.7%, rgba(0,0,0,.10) 50.3%, transparent 50.3%),
+        linear-gradient(45deg, transparent 49.7%, rgba(0,0,0,.10) 49.7%, rgba(0,0,0,.10) 50.3%, transparent 50.3%);
+      pointer-events:none;
+      opacity:.75;
+    }
+
+    .dynTarget{
+      width: calc(var(--base) - 12px);
+      height: calc(var(--base) - 12px);
+      position: relative;
+      z-index: 1;
+    }
+
+    .stepStrip{
+      display:flex;
+      flex-direction:row;
+      gap: var(--gap);
+      align-items:flex-start;
+      flex-wrap:nowrap;
+      min-width: 0;
+    }
+
+    .stepCell{
+      width: var(--base);
+      height: var(--base);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background:#fff;
+      position: relative;
+      display:grid;
+      place-items:center;
+      overflow:hidden;
+      flex: 0 0 auto;
+    }
+
+    .stepCell svg{
+      display:block;
+      position:relative;
+      z-index:1;
+    }
+
+    /* 手机：改为纵向 + 分步自动换行，尽量一屏 */
+    body.mobile .row{
+      flex-direction:column;
+      align-items:flex-start;
+      gap: 12px;
+    }
+    body.mobile .dynWrap{
+      justify-items:start;
+    }
+    body.mobile .stepStrip{
+      flex-wrap:wrap;
+      align-content:flex-start;
+    }
+
+    @media (max-height: 560px){
+      body{ overflow-y:auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <input id="searchInput" placeholder="输入汉字，例如：你好学习生活" />
+  </div>
+
+  <div class="page">
+    <div class="stack" id="stack"></div>
+  </div>
+
+<script>
+  function isLikelyHanzi(ch) {
+    const code = ch.codePointAt(0);
+    return (
+      (code >= 0x4E00 && code <= 0x9FFF) ||
+      (code >= 0x3400 && code <= 0x4DBF) ||
+      (code >= 0xF900 && code <= 0xFAFF)
+    );
+  }
+
+  const MAX_CHARS = 4;
+  const MAX_PER_ROW = 8;
+  const BASE_MAX = 130;
+  const BASE_MIN = 56;
+  const GAP = 12;
+
+  function setUnifiedBase(px){
+    document.documentElement.style.setProperty("--base", px + "px");
+  }
+
+  function buildStepSvg(charData, k, size){
+    const padding = Math.max(6, Math.floor(size*0.08));
+    const strokes = charData.strokes || [];
+    const t = HanziWriter.getScalingTransform(size, size, padding);
+
+    const ghost = strokes.map((d,i)=> i<k ? "" :
+      `<path d="${d}" fill="none" stroke="rgba(17,24,39,.14)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>`
+    ).join("");
+
+    const done = strokes.map((d,i)=> i>=k ? "" :
+      `<path d="${d}" fill="#111827"/>`
+    ).join("");
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">
+      <g transform="${t.transform}">
+        ${ghost}${done}
+      </g>
+    </svg>`;
+  }
+
+  function makePlayer(targetId, ch, charData, basePx){
+    const writer = HanziWriter.create(targetId, ch, {
+      width: basePx-12,
+      height: basePx-12,
+      padding: Math.max(6, Math.floor(basePx*0.08)),
+      showOutline: true,
+      outlineColor:"rgba(17,24,39,.12)",
+      strokeColor:"#111827",
+      delayBetweenStrokes:120,
+      charDataLoader:()=>Promise.resolve(charData)
+    });
+
+    let playing = false;
+    let token = 0;
+
+    async function playOnce(){
+      writer.hideCharacter();
+      try{ await writer.animateCharacter(); }catch(e){}
+    }
+
+    async function loop(){
+      const my = ++token;
+      while (playing && my === token){
+        await playOnce();
+        if (!playing || my !== token) break;
+        await new Promise(r=>setTimeout(r, 420));
+      }
+    }
+
+    function setPlaying(v){
+      playing = v;
+      token++;
+      if (playing) loop();
+    }
+
+    playOnce().then(()=>setPlaying(false));
+    return { setPlaying, get playing(){ return playing; } };
+  }
+
+  function chooseBaseAndLayout(counts, charN){
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const topH = 58;
+    const paddingY = 14 + 22;
+    const availH = Math.max(200, vh - topH - paddingY);
+    const availW = Math.max(240, Math.min(1400, vw - 24));
+
+    const mobile = vw < 980;
+    document.body.classList.toggle("mobile", mobile);
+
+    const suggestedByStroke = counts.length
+      ? Math.min(...counts.map(c => {
+          if (c <= MAX_PER_ROW) return BASE_MAX;
+          const scale = MAX_PER_ROW / c;
+          return Math.max(BASE_MIN, Math.floor(BASE_MAX * scale));
+        }))
+      : BASE_MAX;
+
+    let best = { base: Math.min(BASE_MAX, suggestedByStroke), m: MAX_PER_ROW };
+
+    if (mobile){
+      for (let m = Math.min(MAX_PER_ROW, 8); m >= 3; m--){
+        const baseByW = Math.floor((availW - GAP*(m-1)) / m);
+        const base = Math.max(BASE_MIN, Math.min(BASE_MAX, Math.min(baseByW, suggestedByStroke)));
+
+        const btnH = 34;
+        const dynBlockH = base + 8 + btnH;
+        const stepsRows = counts.map(c => Math.ceil(c / m));
+        const perCharHs = stepsRows.map(r => dynBlockH + 12 + (r*base) + Math.max(0, r-1)*GAP);
+        const totalH = perCharHs.slice(0, charN).reduce((a,b)=>a+b, 0) + Math.max(0, charN-1)*16;
+
+        if (totalH <= availH){
+          best = { base, m };
+          break;
+        }else{
+          if (base < best.base) best = { base, m };
+        }
+      }
+    }else{
+      best.base = Math.min(BASE_MAX, suggestedByStroke);
+      best.m = MAX_PER_ROW;
+    }
+
+    return best;
+  }
+
+  async function render(text){
+    const stack = document.getElementById("stack");
+    stack.innerHTML = "";
+
+    const chars = Array.from(text).filter(isLikelyHanzi).slice(0, MAX_CHARS);
+    const dataList = await Promise.all(chars.map(async (ch) => {
+      try{
+        const d = await HanziWriter.loadCharacterData(ch);
+        return { ch, d, count: (d.strokes || []).length };
+      }catch(e){
+        return { ch, d: null, count: 0 };
+      }
+    }));
+
+    const valid = dataList.filter(x => x.d);
+    const counts = valid.map(x => x.count);
+    const charN = Math.max(1, valid.length);
+
+    const { base, m } = chooseBaseAndLayout(counts, Math.min(charN, MAX_CHARS));
+    setUnifiedBase(base);
+
+    while(dataList.length < MAX_CHARS) dataList.push({ ch: null, d: null, count: 0 });
+
+    for(let i=0;i<MAX_CHARS;i++){
+      const item = dataList[i];
+
+      const row = document.createElement("div");
+      row.className = "row";
+
+      const dynWrap = document.createElement("div");
+      dynWrap.className = "dynWrap";
+
+      const dynBox = document.createElement("div");
+      dynBox.className = "box";
+      const dynId = `dyn_${i}_${Date.now()}`;
+      dynBox.innerHTML = item.ch && item.d ? `<div id="${dynId}" class="dynTarget"></div>` : "";
+
+      const ppBtn = document.createElement("button");
+      ppBtn.className = "ppBtn";
+      ppBtn.type = "button";
+      ppBtn.textContent = "播放";
+
+      dynWrap.append(dynBox, ppBtn);
+
+      const stepStrip = document.createElement("div");
+      stepStrip.className = "stepStrip";
+
+      row.append(dynWrap, stepStrip);
+      stack.appendChild(row);
+
+      if(!item.ch || !item.d){
+        ppBtn.style.visibility = "hidden";
+        continue;
+      }
+
+      const player = makePlayer(dynId, item.ch, item.d, base);
+      ppBtn.textContent = "播放";
+
+      ppBtn.onclick = () => {
+        if (player.playing){
+          player.setPlaying(false);
+          ppBtn.textContent = "播放";
+        }else{
+          player.setPlaying(true);
+          ppBtn.textContent = "暂停";
+        }
+      };
+
+      if (document.body.classList.contains("mobile")){
+        stepStrip.style.maxWidth = (m*base + (m-1)*GAP) + "px";
+      }else{
+        stepStrip.style.maxWidth = "";
+      }
+
+      for(let k=1;k<=item.count;k++){
+        const c = document.createElement("div");
+        c.className = "stepCell";
+        c.innerHTML = buildStepSvg(item.d, k, base);
+        stepStrip.appendChild(c);
+      }
+    }
+  }
+
+  const input = document.getElementById("searchInput");
+  input.addEventListener("keydown", e=>{
+    if(e.key==="Enter") render(input.value);
+  });
+
+  let resizeTimer = null;
+  window.addEventListener("resize", ()=>{
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(()=>render(input.value || "你好学习生活"), 120);
+  });
+
+  render("你好学习生活");
+</script>
+</body>
+</html>
